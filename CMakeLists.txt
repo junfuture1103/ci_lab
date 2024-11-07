@@ -6,6 +6,8 @@ set(APP_SRC_FILES
     fsw/src/ci_lab_cmds.c
 )
 
+message(STATUS "C Compiler ID: ${CMAKE_C_COMPILER_ID}")
+
 if (CFE_EDS_ENABLED_BUILD)
   list(APPEND APP_SRC_FILES
     fsw/src/ci_lab_eds_dispatch.c
@@ -21,5 +23,4 @@ endif()
 
 # Create the app module
 add_cfe_app(ci_lab ${APP_SRC_FILES})
-
 target_include_directories(ci_lab PUBLIC fsw/inc)

@@ -41,6 +41,10 @@ bool CI_LAB_VerifyCmdLength(const CFE_MSG_Message_t *MsgPtr, size_t ExpectedLeng
 
     CFE_MSG_GetSize(MsgPtr, &ActualLength);
 
+    // Logged by jun
+    CFE_ES_WriteToSysLog("[CI_LAB_VerifyCmdLength] MSG length: ID = 0x%X,  CC = %u, Len = %u, Expected = %u",
+                        (unsigned int)CFE_SB_MsgIdToValue(MsgId), (unsigned int)FcnCode, (unsigned int)ActualLength,
+                        (unsigned int)ExpectedLength);
     /*
     ** Verify the command packet length...
     */
@@ -111,7 +115,7 @@ void CI_LAB_TaskPipe(const CFE_SB_Buffer_t *SBBufPtr)
     CFE_SB_MsgId_t MsgId = CFE_SB_INVALID_MSG_ID;
 
     CFE_MSG_GetMsgId(&SBBufPtr->Msg, &MsgId);
-
+    
     switch (CFE_SB_MsgIdToValue(MsgId))
     {
         case CI_LAB_CMD_MID:
@@ -123,6 +127,7 @@ void CI_LAB_TaskPipe(const CFE_SB_Buffer_t *SBBufPtr)
             break;
 
         case CI_LAB_READ_UPLINK_MID:
+            CFE_ES_WriteToSysLog("\nCI_LAB_ReadUplinkCmd\n");
             CI_LAB_ReadUplinkCmd((const CI_LAB_ReadUplinkCmd_t *)SBBufPtr);
             break;
 

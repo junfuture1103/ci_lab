@@ -31,6 +31,15 @@
 #include "ci_lab_version.h"
 #include "ci_lab_decode.h"
 
+// socket include by juntheworld
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <arpa/inet.h>
 /*
 ** CI Global Data
 */
@@ -123,7 +132,7 @@ void CI_LAB_TaskInit(void)
             CFE_EVS_SendEvent(CI_LAB_SB_SUBSCRIBE_CMD_ERR_EID, CFE_EVS_EventType_ERROR,
                               "Error subscribing to SB Commands, RC = 0x%08X", (unsigned int)status);
         }
-
+ 
         status = CFE_SB_Subscribe(CFE_SB_ValueToMsgId(CI_LAB_SEND_HK_MID), CI_LAB_Global.CommandPipe);
         if (status != CFE_SUCCESS)
         {
@@ -217,6 +226,7 @@ void CI_LAB_ReadUpLink(void)
 
     CFE_Status_t     CfeStatus;
     CFE_SB_Buffer_t *SBBufPtr;
+    CFE_MSG_Size_t    MsgSize;
 
     for (i = 0; i <= CI_LAB_MAX_INGEST_PKTS; i++)
     {
@@ -243,6 +253,106 @@ void CI_LAB_ReadUpLink(void)
             else
             {
                 CI_LAB_Global.HkTlm.Payload.IngestPackets++;
+
+                CFE_ES_WriteToSysLog("\n\nCI_Uplink before SB_Transmit : StreamId[0]=0x%02X, StreamId[1]=0x%02X",
+                                    SBBufPtr->Msg.CCSDS.Pri.StreamId[0],
+                                    SBBufPtr->Msg.CCSDS.Pri.StreamId[1]);
+
+                // Message to send juntheworld socket log
+                const char *message = "\xAA\xAA\xAA\xAA";
+                
+                /* by juntheworld */
+                // Build a single string with the contents of BufPtr and print using %s
+                uint8_t *bytePtr = (uint8_t *)&SBBufPtr->Msg;
+
+                CFE_MSG_GetSize(&SBBufPtr->Msg, &MsgSize);
+                // Calculate the size needed for msgContent
+                // Each byte will be represented as "XX " (3 characters), plus a null terminator
+                size_t msgContentSize = (unsigned int)MsgSize * 3 + 1;
+
+                // Allocate msgContent on the heap
+                char *msgContent = malloc(msgContentSize);
+                if (msgContent == NULL) {
+                    // Handle malloc failure
+                    CFE_ES_WriteToSysLog("[1-3] Failed to allocate memory for message content\n");
+                    return; // Or handle error appropriately
+                }
+
+                size_t offset = 0;
+
+                for (size_t i = 0; i < MsgSize; i++) {
+                    // Append each byte to the string
+                    int written = snprintf(msgContent + offset, msgContentSize - offset, "%02X ", bytePtr[i]);
+                    if (written < 0) {
+                        // Handle error: snprintf failed or buffer is full
+                        break;
+                    }
+                    offset += written;
+                }
+
+                // Ensure the string is null-terminated
+                if (offset < msgContentSize) {
+                    msgContent[offset] = '\0';
+                } else {
+                    msgContent[msgContentSize - 1] = '\0';
+                }
+
+                // Create a socket
+                int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+                if (sockfd < 0) {
+                    CFE_ES_WriteToSysLog("Failed to create socket\n");
+                    // Handle error if necessary
+                } else {
+                    // Define the server address
+                    struct sockaddr_in serv_addr;
+                    memset(&serv_addr, 0, sizeof(serv_addr));
+                    serv_addr.sin_family = AF_INET;
+                    serv_addr.sin_port = htons(3000);
+
+                    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+                        CFE_ES_WriteToSysLog("Invalid address/Address not supported\n");
+                        close(sockfd);
+                    } else {
+                        // Connect to the server
+                        if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+                            CFE_ES_WriteToSysLog("Connection Failed\n");
+                            close(sockfd);
+                        } else {
+                            // Send the message length first (must)
+                            uint32_t msg_length = htonl(strlen(message));
+                            if (send(sockfd, &msg_length, sizeof(msg_length), 0) < 0) {
+                                CFE_ES_WriteToSysLog("Failed to send message length\n");
+                            } else {
+                                // Send the actual message
+                                if (send(sockfd, message, strlen(message), 0) < 0) {
+                                    CFE_ES_WriteToSysLog("Failed to send message\n");
+                                } else {
+                                    CFE_ES_WriteToSysLog("Sent message: %s\n", message);
+                                }
+                            }
+
+                            // Send MsgSize first
+                            uint32_t netMsgSize = htonl(MsgSize); // Convert to network byte order
+                            if (send(sockfd, &netMsgSize, sizeof(netMsgSize), 0) < 0) {
+                                CFE_ES_WriteToSysLog("[ground command] Failed to send MsgSize\n");
+                                close(sockfd);
+                                free(msgContent);
+                                return;
+                            }
+
+                            // Send the actual message buffer
+                            if (send(sockfd, bytePtr, MsgSize, 0) < 0) {
+                                CFE_ES_WriteToSysLog("[ground command] Failed to send BufPtr data\n");
+                                close(sockfd);
+                                free(msgContent);
+                                return;
+                            }
+                            // Close the socket
+                            close(sockfd);
+                        }
+                    }
+                }
+
                 CfeStatus = CFE_SB_TransmitBuffer(SBBufPtr, false);
             }
             CFE_ES_PerfLogExit(CI_LAB_SOCKET_RCV_PERF_ID);
